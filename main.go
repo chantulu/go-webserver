@@ -12,9 +12,16 @@ func HealzHandler(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	mux := http.NewServeMux()
+	cfg := apiConfig{fileserverHits: 0}
 	fileServer := http.FileServer(http.Dir("./static"))
-	mux.Handle("/app/*", http.StripPrefix("/app", fileServer))
+	mux.Handle("/app/*", cfg.middlewareMetricsInc(http.StripPrefix("/app", fileServer)))
 	mux.HandleFunc("/healthz", HealzHandler)
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		MetricsHandler(w, r, &cfg)
+	})
+	mux.HandleFunc("/reset", func(w http.ResponseWriter, r *http.Request) {
+		ResetHandler(w, r, &cfg)
+	})
 	server := http.Server{Handler: mux, Addr: "localhost:8080"}
 	log.Fatal(server.ListenAndServe())
 }
