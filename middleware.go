@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"server/internal"
 	"slices"
 	"strings"
 )
@@ -93,4 +94,75 @@ func replaceProfanity(s string) string{
 		}
 	}
 	return strings.Join(textSplit, " ")
+}
+
+func CreateChirpHandler(w http.ResponseWriter, r *http.Request, db *internal.DB) {
+	type parameters struct {
+		Body string `json:"body"`
+	}
+	type retError struct {
+		Error string `json:"error"`
+	}
+	
+	
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		errMsg := retError{Error: err.Error()}
+		dat, _ := json.Marshal(errMsg)
+		log.Printf("Error decoding parameters: %s", err)
+		w.WriteHeader(500)
+		w.Write(dat)
+		return
+    }
+
+	if len(params.Body) > 140 {
+		errMsg := retError{Error: "Chirp is too long"}
+		dat, _ := json.Marshal(errMsg)
+		w.WriteHeader(400)
+		w.Write(dat)
+		return
+	}
+
+	newChirp,err := db.CreateChirp(replaceProfanity(params.Body))
+	if err != nil {
+		errMsg := retError{Error: err.Error()}
+		log.Printf("Error decoding parameters: %s", err)
+		dat, _ := json.Marshal(errMsg)
+		w.WriteHeader(500)
+		w.Write(dat)
+		return
+	}
+	dat, err := json.Marshal(newChirp)
+	if err != nil {
+		errMsg := retError{Error: err.Error()}
+		log.Printf("Error decoding parameters: %s", err)
+		dat, _ := json.Marshal(errMsg)
+		w.WriteHeader(500)
+		w.Write(dat)
+		return
+    }
+	w.WriteHeader(201)
+	w.Write(dat)
+}
+
+
+func GetChirpsHandler(w http.ResponseWriter, r *http.Request, db *internal.DB) {
+	type retError struct {
+		Error string `json:"error"`
+	}
+	chirps, err := db.GetChirps()
+	if err != nil {
+		errMsg := retError{Error: err.Error()}
+		log.Printf("Error loading chirps: %v", err)
+		dat, _ := json.Marshal(errMsg)
+		w.WriteHeader(500)
+		w.Write(dat)
+		return
+	}
+	dat, _ := json.Marshal(chirps)
+	w.WriteHeader(200)
+	w.Write(dat)
 }
