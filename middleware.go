@@ -166,3 +166,24 @@ func GetChirpsHandler(w http.ResponseWriter, r *http.Request, db *internal.DB) {
 	w.WriteHeader(200)
 	w.Write(dat)
 }
+
+func GetChirpHandler(w http.ResponseWriter, r *http.Request, db *internal.DB, chirpID int) {
+	type retError struct {
+		Error string `json:"error"`
+	}
+  chirp, ok := db.GetSingleChirp(chirpID)
+  if !ok {
+	errMsg := retError{Error: "Chirp not found"}
+	dat, _ := json.Marshal(errMsg)
+	w.WriteHeader(404)
+	w.Write(dat)
+	return
+  }
+  dat, err := json.Marshal(chirp)
+  if err != nil {
+	  w.WriteHeader(500)
+	  return
+	}
+  w.WriteHeader(200)
+  w.Write(dat)
+}

@@ -116,3 +116,15 @@ func (db *DB) writeDB(dbStructure DBStructure) error {
 	}
 	return nil
 }
+
+func (db *DB) GetSingleChirp(id int) (Chirp, bool) {
+	dbstructure,err := db.loadDB()
+	if err != nil{
+		return  Chirp{},false
+	}
+	chirp, ok := dbstructure.Chirps[id]
+	if !ok {
+		return Chirp{},false
+	}
+	return chirp, true
+}

@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"server/internal"
+	"strconv"
 )
 
 func HealzHandler(w http.ResponseWriter, r *http.Request) {
@@ -40,6 +42,20 @@ func main() {
 	})
 	mux.HandleFunc("GET /api/chirps", func(w http.ResponseWriter, r *http.Request) {
 		GetChirpsHandler(w, r, db)
+	})
+	mux.HandleFunc("GET /api/chirps/{id}", func(w http.ResponseWriter, r *http.Request) {
+		type retError struct {
+			Error string `json:"error"`
+		}
+		chirpID, err := strconv.Atoi(r.PathValue("id"))
+		if err != nil{
+			errMsg := retError{Error: err.Error()}
+			dat, _ := json.Marshal(errMsg)
+			w.WriteHeader(400)
+			w.Write(dat)
+			return
+		}
+		GetChirpHandler(w, r, db, chirpID)
 	})
 
 	server := http.Server{Handler: mux, Addr: "localhost:8080"}
