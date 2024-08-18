@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -17,9 +18,14 @@ func HealzHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 	mux := http.NewServeMux()
 	cfg := apiConfig{fileserverHits: 0}
+	dbg := flag.Bool("debug", false, "Enable debug mode")
+	flag.Parse()
 	fileServer := http.FileServer(http.Dir("./static"))
 	dbPath := "./db.json"
 	db, err := internal.NewDB(dbPath)
+	if *dbg{
+		db.ResetDB()	
+	}
 	if err != nil {
 		log.Fatal("ERROR: cannot initialize database at "+ dbPath)
 	}
@@ -56,6 +62,12 @@ func main() {
 			return
 		}
 		GetChirpHandler(w, r, db, chirpID)
+	})
+	mux.HandleFunc("GET /api/users", func(w http.ResponseWriter, r *http.Request) {
+		GetUsersHandler(w, r, db)
+	})
+	mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, r *http.Request) {
+		CreateUsersHandler(w, r, db)
 	})
 
 	server := http.Server{Handler: mux, Addr: "localhost:8080"}

@@ -16,10 +16,17 @@ type DB struct {
 
 type DBStructure struct {
 	Chirps map[int]Chirp `json:"chirps"`
+	Users map[int]User `json:"users"`
 }
 
 type Chirp struct {
 	Body string `json:"body"`
+	ID int `json:"id"`
+}
+
+
+type User struct {
+	Email string `json:"email"`
 	ID int `json:"id"`
 }
 
@@ -74,14 +81,77 @@ func (db *DB) GetChirps() ([]Chirp, error) {
 	return chirpSlice, nil
 }
 
+// GetChirps returns all chirps in the database
+func (db *DB) GetUsers() ([]User, error) {
+	dbContent, err := db.loadDB()
+	if err != nil {
+		return []User{},err
+	}
+	chirpSlice := []User{}
+	for _, user := range dbContent.Users{
+		chirpSlice = append(chirpSlice, user)
+	}
+	return chirpSlice, nil
+}
+
+
+// CreateChirp creates a new chirp and saves it to disk
+func (db *DB) CreateUser(email string) (User, error) {
+	users, err := db.GetUsers()
+	if err != nil {
+		return User{}, errors.New("an error occurred getting chirps")
+	}
+	sort.Slice(users, func(i, j int) bool{
+		return users[i].ID < users[j].ID
+	})
+	lastIndex := 0
+	if len(users) > 0 {
+		lastIndex = users[len(users)-1].ID
+	}
+	newUser := User{
+		ID: lastIndex+1,
+		Email: email,
+	}
+	users = append(users, newUser)
+	dbContent := DBStructure{}
+	dbContent.Users = make(map[int]User)
+	for _,user := range users{
+		dbContent.Users[user.ID] = user
+	}
+	db.writeDB(dbContent)
+	return newUser, nil
+}
+
 // ensureDB creates a new database file if it doesn't exist
 func (db *DB) ensureDB() error {
 	if _, err := os.Stat(db.path); errors.Is(err, os.ErrNotExist) {
-		initialContent := []byte("{\"chirps\":{}}")
+		initialContent := []byte("{\"chirps\":{}, \"users\":{}}")
 		err := os.WriteFile(db.path, initialContent, 0666)
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
+	}
+	return nil
+}
+
+func (db *DB) deleteDB() error {
+	if _, err := os.Stat(db.path); err == nil {
+		err := os.Remove(db.path)
+		if err != nil {
+			log.Fatalf("%v", err)
+		}
+	}
+	return nil
+}
+
+func (db *DB) ResetDB() error {
+	err := db.deleteDB()
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+	err = db.ensureDB()
+	if err != nil {
+		log.Fatalf("%v", err)
 	}
 	return nil
 }
