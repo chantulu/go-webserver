@@ -28,6 +28,20 @@ type Chirp struct {
 type User struct {
 	Email string `json:"email"`
 	ID int `json:"id"`
+	Password string `json:"password"`
+}
+
+type UserExternal struct {
+	Email string `json:"email"`
+	ID int `json:"id"`
+}
+
+
+func DbUsertoUserX(dbUser User) UserExternal {
+    return UserExternal{
+        ID:       dbUser.ID,
+        Email:    dbUser.Email,
+    }
 }
 
 // NewDB creates a new database connection
@@ -96,10 +110,10 @@ func (db *DB) GetUsers() ([]User, error) {
 
 
 // CreateChirp creates a new chirp and saves it to disk
-func (db *DB) CreateUser(email string) (User, error) {
+func (db *DB) CreateUser(email, password string) (UserExternal, error) {
 	users, err := db.GetUsers()
 	if err != nil {
-		return User{}, errors.New("an error occurred getting chirps")
+		return UserExternal{}, errors.New("an error occurred getting chirps")
 	}
 	sort.Slice(users, func(i, j int) bool{
 		return users[i].ID < users[j].ID
@@ -107,10 +121,15 @@ func (db *DB) CreateUser(email string) (User, error) {
 	lastIndex := 0
 	if len(users) > 0 {
 		lastIndex = users[len(users)-1].ID
+		if _,ok := db.GetSingleUserByEmail(email); ok{
+			return UserExternal{}, errors.New("User already exists")
+		}
 	}
+	pass, _ := HashPassword(password)
 	newUser := User{
 		ID: lastIndex+1,
 		Email: email,
+		Password: pass,
 	}
 	users = append(users, newUser)
 	dbContent := DBStructure{}
@@ -119,7 +138,21 @@ func (db *DB) CreateUser(email string) (User, error) {
 		dbContent.Users[user.ID] = user
 	}
 	db.writeDB(dbContent)
-	return newUser, nil
+	return DbUsertoUserX(newUser), nil
+}
+
+func (db *DB) GetSingleUserByEmail(email string) (User, bool) {
+	dbstructure,err := db.loadDB()
+	if err != nil{
+		return  User{},false
+	}
+	
+	for _,user := range dbstructure.Users{
+		if user.Email == email{
+			return user, true
+		}
+	}
+	return User{},false
 }
 
 // ensureDB creates a new database file if it doesn't exist

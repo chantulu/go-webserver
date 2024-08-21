@@ -69,6 +69,9 @@ func main() {
 	mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, r *http.Request) {
 		CreateUsersHandler(w, r, db)
 	})
+	mux.HandleFunc("POST /api/login", func(w http.ResponseWriter, r *http.Request) {
+		ValidateUserHandler(w, r, db)
+	})
 
 	server := http.Server{Handler: mux, Addr: "localhost:8080"}
 	log.Fatal(server.ListenAndServe())

@@ -188,6 +188,8 @@ func GetChirpHandler(w http.ResponseWriter, r *http.Request, db *internal.DB, ch
   w.Write(dat)
 }
 
+
+
 func GetUsersHandler(w http.ResponseWriter, r *http.Request, db *internal.DB) {
 	type retError struct {
 		Error string `json:"error"`
@@ -210,6 +212,7 @@ func GetUsersHandler(w http.ResponseWriter, r *http.Request, db *internal.DB) {
 func CreateUsersHandler(w http.ResponseWriter, r *http.Request, db *internal.DB) {
 	type parameters struct {
 		Email string `json:"email"`
+		Password string `json:"password"`
 	}
 	type retError struct {
 		Error string `json:"error"`
@@ -237,7 +240,7 @@ func CreateUsersHandler(w http.ResponseWriter, r *http.Request, db *internal.DB)
 		return
 	}
 
-	newUser,err := db.CreateUser(params.Email)
+	newUser,err := db.CreateUser(params.Email, params.Password)
 	if err != nil {
 		errMsg := retError{Error: err.Error()}
 		log.Printf("Error decoding parameters: %s", err)
@@ -257,4 +260,42 @@ func CreateUsersHandler(w http.ResponseWriter, r *http.Request, db *internal.DB)
     }
 	w.WriteHeader(201)
 	w.Write(dat)
+}
+
+func ValidateUserHandler(w http.ResponseWriter, r *http.Request, db *internal.DB) {
+	type parameters struct {
+		Email string `json:"email"`
+		Password string `json:"password"`
+	}
+	type retError struct {
+		Error string `json:"error"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		errMsg := retError{Error: err.Error()}
+		dat, _ := json.Marshal(errMsg)
+		log.Printf("Error decoding parameters: %s", err)
+		w.WriteHeader(500)
+		w.Write(dat)
+		return
+    }
+
+	user, ok := db.GetSingleUserByEmail(params.Email)
+
+	if !ok || !(internal.CheckPasswordHash(params.Password, user.Password)) {
+		errMsg := retError{Error: "User not found"}
+		dat, _ := json.Marshal(errMsg)
+		w.WriteHeader(401)
+		w.Write(dat)
+		return
+	}
+
+	dat, _ := json.Marshal(internal.DbUsertoUserX(user))
+	w.WriteHeader(200)
+	w.Write(dat)
+
 }
