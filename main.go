@@ -6,9 +6,15 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"server/internal"
 	"strconv"
+	"strings"
+
+	"github.com/lpernett/godotenv"
 )
+
+
 
 func HealzHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Content-Type", "text/plain; charset=utf-8")
@@ -23,6 +29,14 @@ func main() {
 	fileServer := http.FileServer(http.Dir("./static"))
 	dbPath := "./db.json"
 	db, err := internal.NewDB(dbPath)
+	errEnv := godotenv.Load()
+	if errEnv != nil {
+		log.Fatal("ERROR: Cannot initialize env")
+	}
+	jwtSecret := os.Getenv("JWT_SECRET")
+	pokaKey := os.Getenv("POLKA_KEY")
+	cfg.jwtSecret = jwtSecret
+	cfg.polkaKey = pokaKey
 	if *dbg{
 		db.ResetDB()	
 	}
@@ -44,7 +58,7 @@ func main() {
 	})
 	mux.HandleFunc("POST /api/validate_chirp", validateChirpHandler)
 	mux.HandleFunc("POST /api/chirps", func(w http.ResponseWriter, r *http.Request) {
-		CreateChirpHandler(w, r, db)
+		CreateChirpHandler(w, r, db, &cfg)
 	})
 	mux.HandleFunc("GET /api/chirps", func(w http.ResponseWriter, r *http.Request) {
 		GetChirpsHandler(w, r, db)
@@ -69,8 +83,40 @@ func main() {
 	mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, r *http.Request) {
 		CreateUsersHandler(w, r, db)
 	})
+	mux.HandleFunc("PUT /api/users", func(w http.ResponseWriter, r *http.Request) {
+		UpdateUserHandler(w, r, db, &cfg)
+	})
 	mux.HandleFunc("POST /api/login", func(w http.ResponseWriter, r *http.Request) {
-		ValidateUserHandler(w, r, db)
+		ValidateUserHandler(w, r, db, &cfg)
+	})
+	mux.HandleFunc("POST /api/refresh", func(w http.ResponseWriter, r *http.Request) {
+		RefreshTokenHandler(w, r, db, &cfg)
+	})
+	mux.HandleFunc("POST /api/revoke", func(w http.ResponseWriter, r *http.Request) {
+		RevokeTokenHandler(w, r, db, &cfg)
+	})
+	mux.HandleFunc("DELETE /api/chirps/{id}", func(w http.ResponseWriter, r *http.Request) {
+		type retError struct {
+			Error string `json:"error"`
+		}
+		chirpID, err := strconv.Atoi(r.PathValue("id"))
+		if err != nil{
+			errMsg := retError{Error: err.Error()}
+			dat, _ := json.Marshal(errMsg)
+			w.WriteHeader(400)
+			w.Write(dat)
+			return
+		}
+		DeleteChirpHandler(w, r, db, &cfg, chirpID)
+	})
+	mux.HandleFunc("POST /api/polka/webhooks", func(w http.ResponseWriter, r *http.Request) {
+		apiKey := r.Header.Get("Authorization")
+		apiKey = strings.Replace(apiKey,"ApiKey ","",1)
+		if apiKey != cfg.polkaKey {
+			w.WriteHeader(401)
+			return
+		}
+		HandlePolkaWebhook(w, r, db, &cfg)
 	})
 
 	server := http.Server{Handler: mux, Addr: "localhost:8080"}

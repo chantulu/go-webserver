@@ -3,10 +3,13 @@ package internal
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"sort"
+	"strconv"
 	"sync"
+	"time"
 )
 
 type DB struct {
@@ -22,6 +25,7 @@ type DBStructure struct {
 type Chirp struct {
 	Body string `json:"body"`
 	ID int `json:"id"`
+	AuthorID int `json:"author_id"`
 }
 
 
@@ -29,11 +33,22 @@ type User struct {
 	Email string `json:"email"`
 	ID int `json:"id"`
 	Password string `json:"password"`
+	RefreshToken string `json:"refresh_token"`
+	RefreshExpiry time.Time `json:"refresh_expiry"`
+	IsChirpyRed bool `json:"is_chirpy_red"`
 }
+
+type UpdateUserParams struct {
+    Email        string
+    Password     string
+    RefreshToken string
+	RefreshExpiry time.Time
+} 
 
 type UserExternal struct {
 	Email string `json:"email"`
 	ID int `json:"id"`
+	IsChirpyRed bool `json:"is_chirpy_red"`
 }
 
 
@@ -41,6 +56,7 @@ func DbUsertoUserX(dbUser User) UserExternal {
     return UserExternal{
         ID:       dbUser.ID,
         Email:    dbUser.Email,
+		IsChirpyRed: dbUser.IsChirpyRed,
     }
 }
 
@@ -56,10 +72,14 @@ func NewDB(path string) (*DB, error){
 }	
 
 // CreateChirp creates a new chirp and saves it to disk
-func (db *DB) CreateChirp(body string) (Chirp, error) {
+func (db *DB) CreateChirp(body string, userId int) (Chirp, error) {
 	chirps, err := db.GetChirps()
 	if err != nil {
 		return Chirp{}, errors.New("an error occurred getting chirps")
+	}
+	users, err := db.GetUsers()
+	if err != nil {
+		return Chirp{}, errors.New("an error occurred getting users")
 	}
 	sort.Slice(chirps, func(i, j int) bool{
 		return chirps[i].ID < chirps[j].ID
@@ -71,12 +91,17 @@ func (db *DB) CreateChirp(body string) (Chirp, error) {
 	newChirp := Chirp{
 		ID: lastIndex+1,
 		Body: body,
+		AuthorID: userId,
 	}
 	chirps = append(chirps, newChirp)
 	dbContent := DBStructure{}
 	dbContent.Chirps = make(map[int]Chirp)
+	dbContent.Users = make(map[int]User)
 	for _,chirp := range chirps{
 		dbContent.Chirps[chirp.ID] = chirp
+	}
+	for _,user := range users{
+		dbContent.Users[user.ID] = user
 	}
 	db.writeDB(dbContent)
 	return newChirp, nil
@@ -113,6 +138,10 @@ func (db *DB) GetUsers() ([]User, error) {
 func (db *DB) CreateUser(email, password string) (UserExternal, error) {
 	users, err := db.GetUsers()
 	if err != nil {
+		return UserExternal{}, errors.New("an error occurred getting users")
+	}
+	chirps, err := db.GetChirps()
+	if err != nil {
 		return UserExternal{}, errors.New("an error occurred getting chirps")
 	}
 	sort.Slice(users, func(i, j int) bool{
@@ -134,8 +163,12 @@ func (db *DB) CreateUser(email, password string) (UserExternal, error) {
 	users = append(users, newUser)
 	dbContent := DBStructure{}
 	dbContent.Users = make(map[int]User)
+	dbContent.Chirps = make(map[int]Chirp)
 	for _,user := range users{
 		dbContent.Users[user.ID] = user
+	}
+	for _,chirp := range chirps{
+		dbContent.Chirps[chirp.ID] = chirp
 	}
 	db.writeDB(dbContent)
 	return DbUsertoUserX(newUser), nil
@@ -230,4 +263,122 @@ func (db *DB) GetSingleChirp(id int) (Chirp, bool) {
 		return Chirp{},false
 	}
 	return chirp, true
+}
+func (db *DB) GetSingleUser(id int) (User, bool) {
+	dbstructure,err := db.loadDB()
+	if err != nil{
+		return  User{},false
+	}
+	user, ok := dbstructure.Users[id]
+	if !ok {
+		return User{},false
+	}
+	return user, true
+}
+func (db *DB) UpdateSingleUser(id int, params UpdateUserParams, hash bool) (UserExternal,bool) {
+	dbstructure,err := db.loadDB()
+	if err != nil{
+		return  UserExternal{},false
+	}
+	usr, ok := dbstructure.Users[id]
+	if !ok {
+		return UserExternal{},false
+	}
+
+	pass := params.Password
+
+	if hash{
+		pass, _ = HashPassword(params.Password)
+	}
+
+	refreshToken := params.RefreshToken
+	if refreshToken == ""{
+		refreshToken = usr.RefreshToken
+	}
+	refreshExpiry := params.RefreshExpiry
+	if refreshExpiry.IsZero() {
+		refreshExpiry = usr.RefreshExpiry
+	}
+
+	dbstructure.Users[id] = User{
+		Email: params.Email,
+		Password: pass,
+		ID: id,
+		RefreshToken: refreshToken,
+		RefreshExpiry: refreshExpiry,
+	}
+	db.writeDB(dbstructure)
+	return UserExternal{
+		Email: params.Email,
+		ID: id,
+	},true
+}
+
+func (db *DB) RefreshToken(token string, secret string) (string, error){
+	dbstructure,err := db.loadDB()
+	if err != nil{
+		return  "",errors.New("failed to read db")
+	}
+	
+	for _,user := range dbstructure.Users{
+		if user.RefreshToken == token && !user.RefreshExpiry.Before(time.Now())  {
+			tokenString, err := CreateJWT(secret,map[string]interface{}{
+				"Expires": 5000, "Subject": strconv.Itoa(user.ID),
+			})
+			if err != nil{
+				return "",errors.New("failed to generate token")
+			}	
+			return tokenString, nil
+		}
+	}
+	return "",errors.New("unexpected error")
+}
+func (db *DB) RevokeToken(token string) (error){
+	dbstructure,err := db.loadDB()
+	if err != nil{
+		return  errors.New("failed to read db")
+	}
+	
+	for _,user := range dbstructure.Users{
+		if user.RefreshToken == token{
+			_, ok := db.UpdateSingleUser(user.ID, UpdateUserParams{
+				Email: user.Email,
+				Password: user.Password,
+				RefreshToken: "0",
+				RefreshExpiry: time.Unix(1,1),
+			}, false)
+			if ok {
+				return nil
+			}
+		}
+	}
+	return errors.New("unexpected error")
+}
+
+func (db *DB) DeleteChirp(id, userid int) error {
+	dbstructure,err := db.loadDB()
+	if err != nil{
+		return  errors.New("cannot load db");
+	}
+	chirp, ok := dbstructure.Chirps[id]
+	fmt.Println(chirp, userid)
+	if ok && chirp.AuthorID == userid {
+		delete(dbstructure.Chirps, id)
+		db.writeDB(dbstructure)
+		return nil
+	}
+	return errors.New("cannot find matching user")
+}
+
+func(db *DB) UpgradeUser(userid int) error {
+	dbstructure,err := db.loadDB()
+	if err != nil{
+		return  errors.New("cannot load db");
+	}
+	user, ok := dbstructure.Users[userid]
+	if ok {
+		user.IsChirpyRed = true
+		dbstructure.Users[userid] = user // Re-assign the modified user back to the map
+	}
+	return db.writeDB(dbstructure)
 }
